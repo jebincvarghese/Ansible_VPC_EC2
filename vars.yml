@@ -1,0 +1,23 @@
+---
+#VPC
+cidr_vpc: 172.32.0.0/16
+vpc_name: ans_vpc
+region: ap-northeast-1
+aws_access_key: "AKIAZUU7AKOP4QNSSVC6"
+aws_secret_key: "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"
+
+#subnet
+public_subnetA_cidr: 172.32.1.0/24
+public_subnetB_cidr: 172.32.2.0/24
+private_subnetC_cidr: 172.32.3.0/24
+
+
+# Internet Gateway Name
+igw_name: "Public Traffic IGW"
+
+#EC2
+exact_count: 1
+keypair_name : test
+instance_type: t2.micro
+image_id: ami-02c3627b04781eada
+userdata: "{{ lookup('file', 'userdata.sh') }}"
