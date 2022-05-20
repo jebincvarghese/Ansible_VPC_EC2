@@ -1,0 +1,13 @@
+[Unit]
+Description=Java Application
+Wants=syslog.target network.target remote-fs.target
+After=remote-fs.target
+Before=multi-user.target
+[Service]
+ExecStart=/bin/java -jar /home/ec2-user/java_spring_boot_app/contacts-0.0.1-SNAPSHOT.jar
+ExecStop=/bin/kill -15 $MAINPID
+Type = simple
+[Install]
+WantedBy=multi-user.target
+
+

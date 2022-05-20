@@ -19,6 +19,8 @@
         content: "{{ keypair_content.key.private_key }}"
         dest: "{{ keypair_name }}.pem"
         mode: 0400
+    
+
 
   #######CREATE VPC ###########   
     - name: "VPC setup"
@@ -143,8 +145,8 @@
             to_port: 80
             cidr_ip: 0.0.0.0/0
           - proto: tcp
-            from_port: 443
-            to_port: 443
+            from_port: 8080
+            to_port: 8080
             cidr_ip: 0.0.0.0/0
         rules_egress:
           - proto: all
@@ -169,11 +171,55 @@
             from_port: 80
             to_port: 80
             group_id: "{{ webserver_sg.group_id }}"
+          - proto: "tcp"
+            from_port: 8080
+            to_port: 8080
+            group_id: "{{ webserver_sg.group_id }}"
         rules_egress:
           - proto: all
             cidr_ip: 0.0.0.0/0
+        
+######################Launching Web Server#######################
 
-  ######################Launching Web Server#######################
+    - name: Launching private Server in the VPC
+      ec2:
+        key_name: "{{ keypair_name }}"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        instance_type: "{{ instance_type }}"
+        region: "{{ region }}"
+        image: "{{ image_id }}"
+        group: DB-Server-sg
+        vpc_subnet_id: "{{ private_subnet.subnet.id }}"
+        user_data: "{{ userdata }}"
+        assign_public_ip: no
+        wait: true
+        exact_count: 1
+        count_tag:
+          Name: "Privateserver"
+        instance_tags:
+          Name: "Privateserver"
+      register: ec2_private
+
+    - name: Wait for 5 Seconds
+      wait_for: timeout=15        
+    
+    - name: "Fetching Ec2 Instance Details"
+      ec2_instance_info:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+        filters:
+          vpc-id: "{{ vpc_id }}"
+          "tag:Name": Privateserver
+          instance-state-name: [ "running"]
+      register: ec2_private
+
+    - name: "debug "
+      debug:
+        var: ec2_private
+        
+######################Launching Web Server#######################
     - name: "Launching Web Server"
       ec2:
         
@@ -191,6 +237,7 @@
           Name: "webserver"
         exact_count: 1
         wait: true
+      register: ec2_public
 
     - name: Wait for 5 Seconds
       wait_for: timeout=15        
@@ -202,13 +249,18 @@
         region: "{{ region }}"
         filters:
           vpc-id: "{{ vpc_id }}"
+          "tag:Name": webserver
           instance-state-name: [ "running"]
-      register: ec2_status
+      register: ec2_public
 
     - name: "debug "
       debug:
-        var: ec2_status
-            
+        var: ec2_public
+   
+    - name: Wait for 5 Seconds
+      wait_for: timeout=5       
+    
+
   ###########Creating Dynamic Inventory for webserver###############
     - name: "Creating Dynamic Inventory"
       add_host:
@@ -219,50 +271,18 @@
         ansible_user: "ec2-user"
         ansible_ssh_private_key_file: "{{ keypair_name }}.pem"
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
-      with_items: "{{ ec2_status.instances }}"
-      
-  ######Launching private subnet ec2 ####
-
-    - name: Launching private Server in the VPC
-      ec2:
-        key_name: "{{ keypair_name }}"
-        aws_access_key: "{{ aws_access_key }}"
-        aws_secret_key: "{{ aws_secret_key }}"
-        region: "{{ region }}"
-        instance_type: "{{ instance_type }}"
-        image: "{{ image_id }}"
-        group: DB-Server-sg
-        vpc_subnet_id: "{{ private_subnet.subnet.id }}"
-        user_data: "{{ userdata }}"
-        assign_public_ip: no
-        wait: true
-        user_data: "{{ userdata }}"
-        count_tag:
-          Name: "DatabaseServer"
-        instance_tags:
-          Name: "DatabaseServer"
-        exact_count: "{{ exact_count }}"
-  #   register: ec2_status 
-
+      with_items: "{{ ec2_public.instances }}"
 
 ##vpc ec2 setups###
 - name: "Installing Apache Webserver"
   become: true
   hosts: hwebserver
   tasks:
-  
     - name: "Installing Apache Webserver"
       yum:
         name: httpd
         state: present
-            
-            
-    - name: "Creating index.html"
-      copy:
-        content: "<center><h1>{{ ansible_fqdn }} </h1></center>"
-        dest: /var/www/html/index.html
-            
-    - name: "Restarting/Enabling httpd"
+    - name: "httpd-restart"
       service:
         name: httpd
         state: restarted

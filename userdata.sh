@@ -7,13 +7,14 @@ service sshd restart
 
 yum install httpd php -y
 
-cat <<EOF > /var/www/html/index.php
-<?php
-\$output = shell_exec('echo $HOSTNAME');
-echo "<h1><center><pre>\$output</pre></center></h1>";
-echo "<h1><center> Version-1 </center></h1>"
-?>
-EOF
+echo "<VirtualHost *:80> 
+ProxyPreserveHost On 
+ProxyRequests Off 
+ServerName  ansible_fqdn
+ServerAlias  ansible_fqdn  
+ProxyPass / https://jebin.com:80 
+ProxyPassReverse / http://172.31.16.101:3000 
+</VirtualHost>" >> /etc/httpd/conf/httpd.conf
 
 service httpd restart
 chkconfig httpd on

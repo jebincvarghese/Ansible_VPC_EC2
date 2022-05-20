@@ -1,0 +1,91 @@
+---
+- name: "Installing And Configuring mariadb-server"
+  hosts: all
+  become: true
+  vars:
+    mariadb_root_password: "12345678"
+    app_db_name: "contacts"
+    app_db_user: "contacts"
+    app_db_password: "12345678"
+    git_url: "https://github.com/jebincvarghese/java_spring_boot_app.git"
+  tasks:
+           
+    - name: "Package Installation"
+      yum:
+        name: 
+          - mariadb-server
+          - MySQL-python
+          - git
+          - java-11-amazon-corretto
+        state: present
+            
+    - name: "Mariadb-Server - Restart/Enable Service"
+      service:
+        name: mariadb
+        state: restarted
+        enabled: true
+            
+    - name: "Mariadb-Server - Setting Root Password"
+      ignore_errors: true
+      mysql_user:
+        login_user: "root"
+        login_password: ""
+        user: "root"
+        host_all: true
+        password: "{{ mariadb_root_password }}"
+            
+    - name: "Mariadb-Server - Removing Anonymous User"
+      mysql_user:
+        login_user: "root"
+        login_password: "{{ mariadb_root_password }}"
+        user: ""
+        state: absent
+        host_all: true
+            
+    - name: "Mariadb-Server - Removing Test Database"
+      mysql_db:
+        login_user: "root"
+        login_password: "{{ mariadb_root_password }}"
+        name: "test"
+        state: absent
+            
+    - name: "Mariadb-Server - Creating Application Database Called {{ app_db_name }}"
+      mysql_db:
+        login_user: "root"
+        login_password: "{{ mariadb_root_password }}"
+        name: "{{ app_db_name }}"
+        state: present
+            
+    - name: "Mariadb-Server - Creating Application User {{ app_db_user }} and Setting Privileges"
+      mysql_user:
+        login_user: "root"
+        login_password: "{{ mariadb_root_password }}"
+        user: "{{ app_db_user }}"
+        state: present
+        password: "{{ app_db_password }}"
+        priv: "{{ app_db_name }}.*:ALL"
+
+    - name: "Post-Installation - Restarting"
+      service:
+        name: "{{ item }}"
+        state: restarted
+        enabled: true
+      with_items:
+        - mariadb
+
+    - name: "Build - Cloning Github Repository {{ git_url }}"
+      git:
+        repo: "{{ git_url }}"
+        dest: "/home/ec2-user/java_spring_boot_app"
+      register: git_status   
+    
+    - name: "Create service file "
+      template:
+        src: javajar.service
+        dest: "/etc/systemd/system/javajar.service"
+    
+    - name: "Mariadb-Server - Restart/Enable Service"
+      service:
+        name: javajar.service
+        state: restarted
+        enabled: true
