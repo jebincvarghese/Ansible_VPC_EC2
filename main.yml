@@ -1,0 +1,313 @@
+- hosts: localhost
+  connection: local
+  gather_facts: yes
+  vars_files:
+     vars.yml
+  tasks:
+    - name: "Creating Ssh KeyPair"
+      ec2_key:
+          aws_access_key: "{{ aws_access_key }}"
+          aws_secret_key: "{{ aws_secret_key }}"
+          region: "{{ region }}"
+          name: "{{ keypair_name }}"
+          state: present
+      register: keypair_content
+          
+    - name: "Saving Private Key Content"
+      when: keypair_content.changed == true
+      copy:
+        content: "{{ keypair_content.key.private_key }}"
+        dest: "{{ keypair_name }}.pem"
+        mode: 0400
+    
+
+
+  #######CREATE VPC ###########   
+    - name: "VPC setup"
+      ec2_vpc_net:
+        name: "{{ vpc_name }}"
+        cidr_block: "{{ cidr_vpc }}"
+        region: "{{ region }}"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        state: present
+      register: vpc
+
+
+    - name: Set VPC ID in variable
+      set_fact:
+        vpc_id: "{{ vpc.vpc.id }}"
+
+  ######################Subnet Setup#######################
+
+    - name: Create Public Subnet az -A
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        cidr: "{{ public_subnetA_cidr }}"
+        az: "{{ region }}a"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        map_public: yes
+        state: present
+        tags:
+          Name: "Webserver_subnet"
+      register: web_subnet
+
+    - name: Create Private Subnet  az -A
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        cidr: "{{ private_subnetC_cidr }}"
+        az: "{{ region }}a"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        state: present
+        tags:
+          Name: "private_subnet"
+      register: private_subnet
+  ######################Subnet Setup#######################
+
+    - name: Create Public Subnet az -B
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        cidr: "{{ public_subnetB_cidr }}"
+        az: "{{ region }}b"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        map_public: yes
+        state: present
+        tags:
+          Name: "public_subnetB"
+      register: public_subnetB
+
+    - name: Create Private Subnet  az -B
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        cidr: "{{ private_subnetD_cidr }}"
+        az: "{{ region }}b"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        state: present
+        tags:
+          Name: "private_subnetB"
+      register: private_subnetB
+
+  ######################Internet Gateway Setup#######################
+
+    - name: Create IGW
+      ec2_vpc_igw: 
+        vpc_id: "{{ vpc_id }}"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+        state: present
+        tags:
+          Name: "{{ igw_name }}"
+      register: igw
+
+    - name: Set route table for Public Subnets
+      ec2_vpc_route_table:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+        state: present
+        vpc_id: "{{ vpc_id }}"
+  #changed_subnet
+        subnets: 
+          - "{{ web_subnet.subnet.id }}"      
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw.gateway_id }}"
+  ######################time out#######################
+    - name: Wait for 15 Seconds
+      wait_for: timeout=5
+  ######################Nat Gateway Setup#######################
+    - name: Create Nat Gateway in webserver Subnet
+      ec2_vpc_nat_gateway:
+        subnet_id: "{{ web_subnet.subnet.id }}"
+        state: present
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+      register: nat_gw
+  ######################time out#######################
+    - name: Wait for 10 Seconds
+      wait_for: timeout=10
+
+    - name: Set Private Subnet C Route Table
+      ec2_vpc_route_table:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+        state: present
+        vpc_id: "{{ vpc_id }}"
+        subnets:
+          - "{{ private_subnet.subnet.id }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ nat_gw.nat_gateway_id }}"
+  ######################time out#######################
+    - name: Wait for 5 Seconds
+      wait_for: timeout=5
+
+  ######################Security group creation for bastion server#######################
+
+#This Security group for ssh to the private server
+    - name: Creating bastion-server Security Group
+      ec2_group:
+        name:  "Bastion-sg"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        description: "Bastion-sg"
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: 0.0.0.0/0
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+      register: bastion_sg
+  ######################Security group creation for ALB#######################
+
+    - name: Creating Alb-sg Security Group
+      ec2_group:
+        name:  "Alb-sg"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        description: "Alb-sg"
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            from_port: 8080
+            to_port: 8080
+            cidr_ip: 0.0.0.0/0
+          - proto: tcp
+            from_port: 80
+            to_port: 80
+            cidr_ip: 0.0.0.0/0          
+          - proto: tcp
+            from_port: 443
+            to_port: 443
+            cidr_ip: 0.0.0.0/0
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+      register: alb_sg
+  ######################Security group creation for Private server#######################
+
+    - name: Creating Database Server Security Group
+      ec2_group:
+        name: "DB-Server-sg"
+        description: "DataBase Server-sg"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        vpc_id: "{{ vpc_id }}"
+        region: "{{ region }}"
+        rules:
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            group_id: "{{ bastion_sg.group_id }}"
+          - proto: "tcp"
+            from_port: 8080
+            to_port: 8080
+            group_id: "{{ alb_sg.group_id }}"
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+        
+######################Launching Web Server#######################
+
+    - name: Launching private Server in the VPC
+      ec2:
+        key_name: "{{ keypair_name }}"
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        instance_type: "{{ instance_type }}"
+        region: "{{ region }}"
+        image: "{{ image_id }}"
+        group: DB-Server-sg
+        vpc_subnet_id: "{{ private_subnet.subnet.id }}"
+        user_data: "{{ userdata }}"
+        assign_public_ip: no
+        wait: true
+        exact_count: 1
+        count_tag:
+          Name: "Privateserver"
+        instance_tags:
+          Name: "Privateserver"
+      register: ec2_private
+
+    - name: Wait for 5 Seconds
+      wait_for: timeout=15        
+    
+    - name: "Fetching Ec2 Instance Details"
+      ec2_instance_info:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+        filters:
+          vpc-id: "{{ vpc_id }}"
+          "tag:Name": Privateserver
+          instance-state-name: [ "running"]
+      register: ec2_private
+
+    - name: "debug "
+      debug:
+        var: ec2_private
+
+    - name: "create elb_target_group"
+      elb_target_group:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+        vpc_id: "{{ vpc_id }}"
+        name:  "{{ target_group_name }}"
+        protocol: http
+        port: 8080
+        health_check_path: /index.html
+        successful_response_codes: "200,250-260" 
+        state: present
+        wait_timeout: 30
+        wait: True
+      register : app_tg
+    
+    - name: "debug "
+      debug:
+        var: app_tg
+
+    - name: "create elb_target_group"
+      elb_target:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+        target_group_name: "{{ target_group_name }}"
+        target_id: "{{ item.instance_id }}"
+        target_port: 8080 
+        state: present
+      with_items: "{{  ec2_private.instances }}"
+    
+    - name: Add HTTP listener rules
+      elb_application_lb:
+        aws_access_key: "{{ aws_access_key }}"
+        aws_secret_key: "{{ aws_secret_key }}"
+        region: "{{ region }}"
+        name:  "private"
+        state: present
+        subnets:
+            - "{{ public_subnetB.subnet.id }}"
+            - "{{ web_subnet.subnet.id }}"    
+        security_groups: "{{	alb_sg.group_id  }}"
+        listeners:
+          - Protocol: HTTP
+            Port: 8080
+            DefaultActions:
+              - Type: forward
+                TargetGroupName: "{{ target_group_name }}"

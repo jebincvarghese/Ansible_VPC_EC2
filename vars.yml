@@ -1,0 +1,31 @@
+---
+#VPC
+cidr_vpc: 172.32.0.0/16
+vpc_name: ans_vpc
+region: ap-south-1
+aws_access_key: "**********************************8"
+aws_secret_key: "*******************************8"
+
+#subnet
+public_subnetA_cidr: 172.32.1.0/24
+public_subnetB_cidr: 172.32.2.0/24
+private_subnetC_cidr: 172.32.3.0/24
+private_subnetD_cidr: 172.32.4.0/24
+
+# Internet Gateway Name
+igw_name: "Public Traffic IGW"
+
+#EC2
+exact_count: 1
+keypair_name : vpc
+instance_type: t2.micro
+image_id: *******************
+userdata: "{{ lookup('file', 'userdata.sh') }}"
+
+# targert group
+
+target_group_name: "Private-target"
+
+#application load balancer
+
+alb-name : "private"
