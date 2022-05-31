@@ -1,4 +1,4 @@
-# Ansible VPC EC2 and deploy a sample springboot java application to an EC2 instance in private subnet.
+# Ansible VPC EC2 and deploy a sample springboot java application to an EC2 instance in private subnet using application load balancer .
 
 ##  Setup a bastion host VPC architecture on AWS.
 
